@@ -73,12 +73,6 @@ public abstract class AbstractMockMetadata
     }
 
     @Override
-    public List<SqlFunction> listFunctions(Session session)
-    {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
     public void registerBuiltInFunctions(List<? extends SqlFunction> functions)
     {
         throw new UnsupportedOperationException();
@@ -434,6 +428,24 @@ public abstract class AbstractMockMetadata
 
     @Override
     public MaterializedViewStatus getMaterializedViewStatus(Session session, QualifiedObjectName materializedViewName)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public InsertTableHandle beginRefreshMaterializedView(Session session, TableHandle tableHandle)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public Optional<ConnectorOutputMetadata> finishRefreshMaterializedView(Session session, InsertTableHandle tableHandle, Collection<Slice> fragments, Collection<ComputedStatistics> computedStatistics)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public List<QualifiedObjectName> getReferencedMaterializedViews(Session session, QualifiedObjectName tableName)
     {
         throw new UnsupportedOperationException();
     }

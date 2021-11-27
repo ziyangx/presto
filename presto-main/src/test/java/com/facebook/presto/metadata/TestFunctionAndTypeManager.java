@@ -55,8 +55,8 @@ import static com.facebook.presto.common.type.TimestampWithTimeZoneType.TIMESTAM
 import static com.facebook.presto.common.type.TypeSignature.parseTypeSignature;
 import static com.facebook.presto.metadata.FunctionAndTypeManager.createTestFunctionAndTypeManager;
 import static com.facebook.presto.metadata.FunctionAndTypeManager.qualifyObjectName;
-import static com.facebook.presto.operator.scalar.BuiltInScalarFunctionImplementation.ArgumentProperty.valueTypeArgumentProperty;
-import static com.facebook.presto.operator.scalar.BuiltInScalarFunctionImplementation.NullConvention.RETURN_NULL_ON_NULL;
+import static com.facebook.presto.operator.scalar.ScalarFunctionImplementationChoice.ArgumentProperty.valueTypeArgumentProperty;
+import static com.facebook.presto.operator.scalar.ScalarFunctionImplementationChoice.NullConvention.RETURN_NULL_ON_NULL;
 import static com.facebook.presto.spi.function.FunctionKind.SCALAR;
 import static com.facebook.presto.spi.function.FunctionVersion.notVersioned;
 import static com.facebook.presto.spi.function.Signature.typeVariable;
@@ -158,7 +158,7 @@ public class TestFunctionAndTypeManager
     public void testListingVisibilityBetaFunctionsDisabled()
     {
         FunctionAndTypeManager functionAndTypeManager = createTestFunctionAndTypeManager();
-        List<SqlFunction> functions = functionAndTypeManager.listFunctions(TEST_SESSION);
+        List<SqlFunction> functions = functionAndTypeManager.listFunctions(TEST_SESSION, Optional.empty(), Optional.empty());
         List<String> names = transform(functions, input -> input.getSignature().getNameSuffix());
 
         assertTrue(names.contains("length"), "Expected function names " + names + " to contain 'length'");
@@ -180,7 +180,7 @@ public class TestFunctionAndTypeManager
                 .setSystemProperty(EXPERIMENTAL_FUNCTIONS_ENABLED, "true")
                 .build();
         FunctionAndTypeManager functionAndTypeManager = createTestFunctionAndTypeManager();
-        List<SqlFunction> functions = functionAndTypeManager.listFunctions(session);
+        List<SqlFunction> functions = functionAndTypeManager.listFunctions(session, Optional.empty(), Optional.empty());
         List<String> names = transform(functions, input -> input.getSignature().getNameSuffix());
 
         assertTrue(names.contains("length"), "Expected function names " + names + " to contain 'length'");

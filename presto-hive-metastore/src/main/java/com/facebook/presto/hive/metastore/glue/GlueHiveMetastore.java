@@ -16,7 +16,10 @@ package com.facebook.presto.hive.metastore.glue;
 import com.amazonaws.AmazonServiceException;
 import com.amazonaws.ClientConfiguration;
 import com.amazonaws.auth.AWSCredentialsProvider;
+import com.amazonaws.auth.AWSStaticCredentialsProvider;
+import com.amazonaws.auth.BasicAWSCredentials;
 import com.amazonaws.auth.STSAssumeRoleSessionCredentialsProvider;
+import com.amazonaws.client.builder.AwsClientBuilder.EndpointConfiguration;
 import com.amazonaws.metrics.RequestMetricCollector;
 import com.amazonaws.regions.Region;
 import com.amazonaws.regions.Regions;
@@ -92,6 +95,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
+import io.airlift.units.Duration;
 import org.apache.hadoop.fs.Path;
 import org.weakref.jmx.Flatten;
 import org.weakref.jmx.Managed;
@@ -131,6 +135,7 @@ import static com.facebook.presto.hive.metastore.glue.converter.GlueToPrestoConv
 import static com.facebook.presto.spi.StandardErrorCode.ALREADY_EXISTS;
 import static com.facebook.presto.spi.StandardErrorCode.NOT_SUPPORTED;
 import static com.facebook.presto.spi.security.PrincipalType.USER;
+import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Strings.isNullOrEmpty;
 import static com.google.common.collect.Comparators.lexicographical;
 import static java.util.Comparator.comparing;
@@ -148,6 +153,7 @@ public class GlueHiveMetastore
     private static final String WILDCARD_EXPRESSION = "";
     private static final int BATCH_GET_PARTITION_MAX_PAGE_SIZE = 1000;
     private static final int BATCH_CREATE_PARTITION_MAX_PAGE_SIZE = 100;
+    private static final int AWS_GLUE_GET_PARTITIONS_MAX_RESULTS = 1000;
     private static final Comparator<Partition> PARTITION_COMPARATOR = comparing(Partition::getValues, lexicographical(String.CASE_INSENSITIVE_ORDER));
 
     private final GlueMetastoreStats stats = new GlueMetastoreStats();
@@ -176,12 +182,20 @@ public class GlueHiveMetastore
 
     private static AWSGlueAsync createAsyncGlueClient(GlueHiveMetastoreConfig config, RequestMetricCollector metricsCollector)
     {
-        ClientConfiguration clientConfig = new ClientConfiguration().withMaxConnections(config.getMaxGlueConnections());
+        ClientConfiguration clientConfig = new ClientConfiguration()
+                .withMaxConnections(config.getMaxGlueConnections())
+                .withMaxErrorRetry(config.getMaxGlueErrorRetries());
         AWSGlueAsyncClientBuilder asyncGlueClientBuilder = AWSGlueAsyncClientBuilder.standard()
                 .withMetricsCollector(metricsCollector)
                 .withClientConfiguration(clientConfig);
 
-        if (config.getGlueRegion().isPresent()) {
+        if (config.getGlueEndpointUrl().isPresent()) {
+            checkArgument(config.getGlueRegion().isPresent(), "Glue region must be set when Glue endpoint URL is set");
+            asyncGlueClientBuilder.setEndpointConfiguration(new EndpointConfiguration(
+                    config.getGlueEndpointUrl().get(),
+                    config.getGlueRegion().get()));
+        }
+        else if (config.getGlueRegion().isPresent()) {
             asyncGlueClientBuilder.setRegion(config.getGlueRegion().get());
         }
         else if (config.getPinGlueClientToCurrentRegion()) {
@@ -191,7 +205,12 @@ public class GlueHiveMetastore
             }
         }
 
-        if (config.getIamRole().isPresent()) {
+        if (config.getAwsAccessKey().isPresent() && config.getAwsSecretKey().isPresent()) {
+            AWSCredentialsProvider credentialsProvider = new AWSStaticCredentialsProvider(
+                    new BasicAWSCredentials(config.getAwsAccessKey().get(), config.getAwsSecretKey().get()));
+            asyncGlueClientBuilder.setCredentials(credentialsProvider);
+        }
+        else if (config.getIamRole().isPresent()) {
             AWSCredentialsProvider credentialsProvider = new STSAssumeRoleSessionCredentialsProvider
                     .Builder(config.getIamRole().get(), "roleSessionName")
                     .build();
@@ -740,7 +759,8 @@ public class GlueHiveMetastore
                     .withDatabaseName(databaseName)
                     .withTableName(tableName)
                     .withExpression(expression)
-                    .withSegment(segment);
+                    .withSegment(segment)
+                    .withMaxResults(AWS_GLUE_GET_PARTITIONS_MAX_RESULTS);
 
             do {
                 GetPartitionsResult result = stats.getGetPartitions().record(() -> glueClient.getPartitions(request));
@@ -972,5 +992,11 @@ public class GlueHiveMetastore
     public Set<HivePrivilegeInfo> listTablePrivileges(MetastoreContext metastoreContext, String databaseName, String tableName, PrestoPrincipal principal)
     {
         throw new PrestoException(NOT_SUPPORTED, "listTablePrivileges is not supported by Glue");
+    }
+
+    @Override
+    public void setPartitionLeases(MetastoreContext metastoreContext, String databaseName, String tableName, Map<String, String> partitionNameToLocation, Duration leaseDuration)
+    {
+        throw new PrestoException(NOT_SUPPORTED, "setPartitionLeases is not supported by Glue");
     }
 }

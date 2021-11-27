@@ -65,8 +65,6 @@ public interface Metadata
 
     Type getType(TypeSignature signature);
 
-    List<SqlFunction> listFunctions(Session session);
-
     void registerBuiltInFunctions(List<? extends SqlFunction> functions);
 
     boolean schemaExists(Session session, CatalogSchemaName schema);
@@ -379,6 +377,21 @@ public interface Metadata
      * Get Materialized view status
      */
     MaterializedViewStatus getMaterializedViewStatus(Session session, QualifiedObjectName materializedViewName);
+
+    /**
+     * Begin refresh materialized view
+     */
+    InsertTableHandle beginRefreshMaterializedView(Session session, TableHandle tableHandle);
+
+    /**
+     * Finish refresh materialized view
+     */
+    Optional<ConnectorOutputMetadata> finishRefreshMaterializedView(Session session, InsertTableHandle tableHandle, Collection<Slice> fragments, Collection<ComputedStatistics> computedStatistics);
+
+    /**
+     * Gets the referenced materialized views for a give table
+     */
+    List<QualifiedObjectName> getReferencedMaterializedViews(Session session, QualifiedObjectName tableName);
 
     /**
      * Try to locate a table index that can lookup results by indexableColumns and provide the requested outputColumns.

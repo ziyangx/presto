@@ -73,6 +73,7 @@ public final class HiveQueryRunner
     public static final String HIVE_BUCKETED_CATALOG = "hive_bucketed";
     public static final String TPCH_SCHEMA = "tpch";
     public static final String TPCH_BUCKETED_SCHEMA = "tpch_bucketed";
+    public static final MetastoreContext METASTORE_CONTEXT = new MetastoreContext("test_user", "test_queryId", Optional.empty(), Optional.empty(), Optional.empty());
     private static final String TEMPORARY_TABLE_SCHEMA = "__temporary_tables__";
     private static final DateTimeZone TIME_ZONE = DateTimeZone.forID("America/Bahia_Banderas");
 
@@ -132,6 +133,8 @@ public final class HiveQueryRunner
         Map<String, String> systemProperties = ImmutableMap.<String, String>builder()
                 .put("task.writer-count", "2")
                 .put("task.partitioned-writer-count", "4")
+                .put("tracing.tracer-type", "simple")
+                .put("tracing.enable-distributed-tracing", "simple")
                 .putAll(extraProperties)
                 .build();
 
@@ -184,18 +187,18 @@ public final class HiveQueryRunner
             queryRunner.createCatalog(HIVE_CATALOG, HIVE_CATALOG, hiveProperties);
             queryRunner.createCatalog(HIVE_BUCKETED_CATALOG, HIVE_CATALOG, hiveBucketedProperties);
 
-            if (!metastore.getDatabase(new MetastoreContext("test_user"), TPCH_SCHEMA).isPresent()) {
-                metastore.createDatabase(new MetastoreContext("test_user"), createDatabaseMetastoreObject(TPCH_SCHEMA));
+            if (!metastore.getDatabase(METASTORE_CONTEXT, TPCH_SCHEMA).isPresent()) {
+                metastore.createDatabase(METASTORE_CONTEXT, createDatabaseMetastoreObject(TPCH_SCHEMA));
                 copyTpchTables(queryRunner, "tpch", TINY_SCHEMA_NAME, createSession(Optional.empty()), tables);
             }
 
-            if (!metastore.getDatabase(new MetastoreContext("test_user"), TPCH_BUCKETED_SCHEMA).isPresent()) {
-                metastore.createDatabase(new MetastoreContext("test_user"), createDatabaseMetastoreObject(TPCH_BUCKETED_SCHEMA));
+            if (!metastore.getDatabase(METASTORE_CONTEXT, TPCH_BUCKETED_SCHEMA).isPresent()) {
+                metastore.createDatabase(METASTORE_CONTEXT, createDatabaseMetastoreObject(TPCH_BUCKETED_SCHEMA));
                 copyTpchTablesBucketed(queryRunner, "tpch", TINY_SCHEMA_NAME, createBucketedSession(Optional.empty()), tables);
             }
 
-            if (!metastore.getDatabase(new MetastoreContext("test_user"), TEMPORARY_TABLE_SCHEMA).isPresent()) {
-                metastore.createDatabase(new MetastoreContext("test_user"), createDatabaseMetastoreObject(TEMPORARY_TABLE_SCHEMA));
+            if (!metastore.getDatabase(METASTORE_CONTEXT, TEMPORARY_TABLE_SCHEMA).isPresent()) {
+                metastore.createDatabase(METASTORE_CONTEXT, createDatabaseMetastoreObject(TEMPORARY_TABLE_SCHEMA));
             }
 
             return queryRunner;
@@ -234,7 +237,6 @@ public final class HiveQueryRunner
                         .put("colocated-joins-enabled", "true")
                         .put("grouped-execution-enabled", "true")
                         .put("experimental.spill-enabled", "true")
-                        .put("experimental.join-spill-enabled", "true")
                         .put("experimental.spiller-spill-path", Paths.get(System.getProperty("java.io.tmpdir"), "presto", "spills").toString())
                         .put("experimental.spiller-max-used-space-threshold", "1.0")
                         .put("experimental.memory-revoking-threshold", "0.0") // revoke always

@@ -23,6 +23,7 @@ import com.facebook.presto.testing.TestingConnectorSession;
 import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
 import org.testng.annotations.Test;
 
 import java.util.ArrayList;
@@ -62,7 +63,7 @@ public class TestPinotSplitManager
         PlanBuilder planBuilder = createPlanBuilder(sessionHolder);
         PlanNode plan = tableScan(planBuilder, table, regionId, city, fare, secondsSinceEpoch);
         PinotQueryGenerator.PinotQueryGeneratorResult pinotQueryGeneratorResult = new PinotQueryGenerator(pinotConfig, functionAndTypeManager, functionAndTypeManager, standardFunctionResolution).generate(plan, sessionHolder.getConnectorSession()).get();
-        List<PinotColumnHandle> expectedHandles = ImmutableList.copyOf(pinotQueryGeneratorResult.getContext().getAssignments().values());
+        List<PinotColumnHandle> expectedHandles = ImmutableList.copyOf(pinotQueryGeneratorResult.getContext().getAssignments(pinotQueryGeneratorResult.getGeneratedPinotQuery().getFormat() == PinotQueryGenerator.PinotQueryFormat.SQL).values());
         PinotQueryGenerator.GeneratedPinotQuery generatedPql = pinotQueryGeneratorResult.getGeneratedPinotQuery();
         PinotTableHandle pinotTableHandle = new PinotTableHandle(table.getConnectorId(), table.getSchemaName(), table.getTableName(), Optional.of(false), Optional.of(expectedHandles), Optional.of(generatedPql));
         List<PinotSplit> splits = getSplitsHelper(pinotTableHandle, segmentsPerSplit, false);
@@ -77,7 +78,7 @@ public class TestPinotSplitManager
         PlanBuilder planBuilder = createPlanBuilder(sessionHolder);
         PlanNode plan = filter(planBuilder, tableScan(planBuilder, table, regionId, city, fare, secondsSinceEpoch), getRowExpression("city = 'Boston'", sessionHolder));
         PinotQueryGenerator.PinotQueryGeneratorResult pinotQueryGeneratorResult = new PinotQueryGenerator(pinotConfig, functionAndTypeManager, functionAndTypeManager, standardFunctionResolution).generate(plan, sessionHolder.getConnectorSession()).get();
-        List<PinotColumnHandle> expectedHandles = ImmutableList.copyOf(pinotQueryGeneratorResult.getContext().getAssignments().values());
+        List<PinotColumnHandle> expectedHandles = ImmutableList.copyOf(pinotQueryGeneratorResult.getContext().getAssignments(pinotQueryGeneratorResult.getGeneratedPinotQuery().getFormat() == PinotQueryGenerator.PinotQueryFormat.SQL).values());
         PinotQueryGenerator.GeneratedPinotQuery generatedPql = pinotQueryGeneratorResult.getGeneratedPinotQuery();
         PinotTableHandle pinotTableHandle = new PinotTableHandle(table.getConnectorId(), table.getSchemaName(), table.getTableName(), Optional.of(false), Optional.of(expectedHandles), Optional.of(generatedPql));
         List<PinotSplit> splits = getSplitsHelper(pinotTableHandle, segmentsPerSplit, false);
@@ -181,6 +182,7 @@ public class TestPinotSplitManager
                         forbidSegmentQueries),
                 new FeaturesConfig().isLegacyTimestamp(),
                 Optional.empty(),
+                ImmutableSet.of(),
                 Optional.empty(),
                 ImmutableMap.of());
     }
@@ -200,6 +202,7 @@ public class TestPinotSplitManager
                         limitLarge),
                 new FeaturesConfig().isLegacyTimestamp(),
                 Optional.empty(),
+                ImmutableSet.of(),
                 Optional.empty(),
                 ImmutableMap.of());
     }

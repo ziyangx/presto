@@ -16,6 +16,7 @@ package com.facebook.presto.util;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.LongUnaryOperator;
 
 import static com.google.common.base.Preconditions.checkArgument;
@@ -30,6 +31,7 @@ public class PeriodicTaskExecutor
     private final ScheduledExecutorService executor;
     private final Runnable runnable;
     private final LongUnaryOperator nextDelayFunction;
+    private final AtomicBoolean started = new AtomicBoolean();
 
     private volatile long delayMillis;
     private volatile ScheduledFuture<?> scheduledFuture;
@@ -37,17 +39,30 @@ public class PeriodicTaskExecutor
 
     public PeriodicTaskExecutor(long delayTargetMillis, ScheduledExecutorService executor, Runnable runnable)
     {
-        this(delayTargetMillis, executor, runnable, PeriodicTaskExecutor::nextDelayWithJitterMillis);
+        this(delayTargetMillis, 0, executor, runnable, PeriodicTaskExecutor::nextDelayWithJitterMillis);
     }
 
-    public PeriodicTaskExecutor(long delayTargetMillis, ScheduledExecutorService executor, Runnable runnable, LongUnaryOperator nextDelayFunction)
+    public PeriodicTaskExecutor(long delayTargetMillis, long initDelayMillis, ScheduledExecutorService executor, Runnable runnable)
+    {
+        this(delayTargetMillis, initDelayMillis, executor, runnable, PeriodicTaskExecutor::nextDelayWithJitterMillis);
+    }
+
+    public PeriodicTaskExecutor(long delayTargetMillis, long initDelayMillis, ScheduledExecutorService executor, Runnable runnable, LongUnaryOperator nextDelayFunction)
     {
         checkArgument(delayTargetMillis > 0, "delayTargetMillis must be > 0");
+        checkArgument(initDelayMillis >= 0, "initDelayMillis must be > 0");
         this.delayTargetMillis = delayTargetMillis;
         this.executor = requireNonNull(executor, "executor is null");
         this.runnable = requireNonNull(runnable, "runnable is null");
         this.nextDelayFunction = requireNonNull(nextDelayFunction, "nextDelayFunction is null");
-        tick();
+        this.delayMillis = initDelayMillis;
+    }
+
+    public void start()
+    {
+        if (started.compareAndSet(false, true)) {
+            tick();
+        }
     }
 
     private void tick()
@@ -71,8 +86,10 @@ public class PeriodicTaskExecutor
 
     public void stop()
     {
-        stopped = true;
-        scheduledFuture.cancel(false);
+        if (started.get()) {
+            stopped = true;
+            scheduledFuture.cancel(false);
+        }
     }
 
     private static long nextDelayWithJitterMillis(long delayTargetMillis)

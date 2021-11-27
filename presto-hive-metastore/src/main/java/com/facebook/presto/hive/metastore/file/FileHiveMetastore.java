@@ -49,6 +49,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.io.ByteStreams;
+import io.airlift.units.Duration;
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
@@ -57,6 +58,7 @@ import org.apache.hadoop.fs.Path;
 import javax.annotation.concurrent.ThreadSafe;
 import javax.inject.Inject;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.ArrayDeque;
@@ -111,6 +113,8 @@ public class FileHiveMetastore
     private static final String ADMIN_ROLE_NAME = "admin";
     private static final String PRESTO_SCHEMA_FILE_NAME = ".prestoSchema";
     private static final String PRESTO_PERMISSIONS_DIRECTORY_NAME = ".prestoPermissions";
+    private static final String ICEBERG_TABLE_TYPE_NAME = "table_type";
+    private static final String ICEBERG_TABLE_TYPE_VALUE = "iceberg";
     // todo there should be a way to manage the admins list
     private static final Set<String> ADMIN_USERS = ImmutableSet.of("admin", "hive", "hdfs");
 
@@ -249,7 +253,7 @@ public class FileHiveMetastore
                 if (!externalFileSystem.isDirectory(externalLocation)) {
                     throw new PrestoException(HIVE_METASTORE_ERROR, "External table location does not exist");
                 }
-                if (isChildDirectory(catalogDirectory, externalLocation)) {
+                if (isChildDirectory(catalogDirectory, externalLocation) && !isIcebergTable(table.getParameters())) {
                     throw new PrestoException(HIVE_METASTORE_ERROR, "External table location can not be inside the system metadata directory");
                 }
             }
@@ -259,6 +263,12 @@ public class FileHiveMetastore
         }
         else {
             throw new PrestoException(NOT_SUPPORTED, "Table type not supported: " + table.getTableType());
+        }
+
+        if (!table.getTableType().equals(VIRTUAL_VIEW)) {
+            File location = new File(new Path(table.getStorage().getLocation()).toUri());
+            checkArgument(location.isDirectory(), "Table location is not a directory: %s", location);
+            checkArgument(location.exists(), "Table directory does not exist: %s", location);
         }
 
         writeSchemaFile("table", tableMetadataDirectory, tableCodec, new TableMetadata(table), false);
@@ -430,7 +440,7 @@ public class FileHiveMetastore
         checkArgument(!newTable.getTableType().equals(TEMPORARY_TABLE), "temporary tables must never be stored in the metastore");
 
         Table table = getRequiredTable(metastoreContext, databaseName, tableName);
-        if (!table.getTableType().equals(VIRTUAL_VIEW) || !newTable.getTableType().equals(VIRTUAL_VIEW)) {
+        if ((!table.getTableType().equals(VIRTUAL_VIEW) || !newTable.getTableType().equals(VIRTUAL_VIEW)) && !isIcebergTable(table.getParameters())) {
             throw new PrestoException(HIVE_METASTORE_ERROR, "Only views can be updated with replaceTable");
         }
         if (!table.getDatabaseName().equals(databaseName) || !table.getTableName().equals(tableName)) {
@@ -459,8 +469,11 @@ public class FileHiveMetastore
         requireNonNull(newDatabaseName, "newDatabaseName is null");
         requireNonNull(newTableName, "newTableName is null");
 
-        getRequiredTable(metastoreContext, databaseName, tableName);
+        Table table = getRequiredTable(metastoreContext, databaseName, tableName);
         getRequiredDatabase(metastoreContext, newDatabaseName);
+        if (isIcebergTable(table.getParameters())) {
+            throw new PrestoException(NOT_SUPPORTED, "Rename not supported for Iceberg tables");
+        }
 
         // verify new table does not exist
         verifyTableNotExists(metastoreContext, newDatabaseName, newTableName);
@@ -473,6 +486,11 @@ public class FileHiveMetastore
         catch (IOException e) {
             throw new PrestoException(HIVE_METASTORE_ERROR, e);
         }
+    }
+
+    private static boolean isIcebergTable(Map<String, String> parameters)
+    {
+        return ICEBERG_TABLE_TYPE_VALUE.equalsIgnoreCase(parameters.get(ICEBERG_TABLE_TYPE_NAME));
     }
 
     @Override
@@ -908,8 +926,8 @@ public class FileHiveMetastore
         List<String> parts = convertPredicateToParts(partitionPredicates);
         // todo this should be more efficient by selectively walking the directory tree
         return getPartitionNames(metastoreContext, databaseName, tableName).map(partitionNames -> partitionNames.stream()
-                .filter(partitionName -> partitionMatches(partitionName, parts))
-                .collect(toImmutableList()))
+                        .filter(partitionName -> partitionMatches(partitionName, parts))
+                        .collect(toImmutableList()))
                 .orElse(ImmutableList.of());
     }
 
@@ -977,6 +995,12 @@ public class FileHiveMetastore
         currentPrivileges.removeAll(privileges);
 
         setTablePrivileges(metastoreContext, grantee, databaseName, tableName, currentPrivileges);
+    }
+
+    @Override
+    public synchronized void setPartitionLeases(MetastoreContext metastoreContext, String databaseName, String tableName, Map<String, String> partitionNameToLocation, Duration leaseDuration)
+    {
+        throw new UnsupportedOperationException("setPartitionLeases is not supported in FileHiveMetastore");
     }
 
     private synchronized void setTablePrivileges(

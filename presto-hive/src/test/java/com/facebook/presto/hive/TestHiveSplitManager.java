@@ -471,7 +471,8 @@ public class TestHiveSplitManager
                         ImmutableMap.of(),
                         Optional.empty(),
                         false,
-                        true),
+                        true,
+                        0),
                 PARTITION_NAME,
                 partitionStatistics);
 
@@ -501,6 +502,7 @@ public class TestHiveSplitManager
                 FILTER_STATS_CALCULATOR_SERVICE,
                 new TableParameterCodec(),
                 HiveTestUtils.PARTITION_UPDATE_CODEC,
+                HiveTestUtils.PARTITION_UPDATE_SMILE_CODEC,
                 executor,
                 new HiveTypeTranslator(),
                 new HiveStagingFileCommitter(hdfsEnvironment, executor),
@@ -548,7 +550,7 @@ public class TestHiveSplitManager
 
         ConnectorSplitSource splitSource = splitManager.getSplits(
                 new HiveTransactionHandle(),
-                new TestingConnectorSession(new HiveSessionProperties(hiveClientConfig, new OrcFileWriterConfig(), new ParquetFileWriterConfig()).getSessionProperties()),
+                new TestingConnectorSession(new HiveSessionProperties(hiveClientConfig, new OrcFileWriterConfig(), new ParquetFileWriterConfig(), new CacheConfig()).getSessionProperties()),
                 new HiveTableLayoutHandle(
                         new SchemaTableName("test_schema", "test_table"),
                         "test_path",

@@ -101,7 +101,9 @@ public class LegacyAccessControl
         }
 
         TransactionalMetadata metadata = hiveTransactionManager.get(transaction);
-        Optional<Table> target = metadata.getMetastore().getTable(new MetastoreContext(identity), tableName.getSchemaName(), tableName.getTableName());
+        // TODO: Refactor code to inject metastore headers using AccessControlContext instead of empty()
+        MetastoreContext metastoreContext = new MetastoreContext(identity, context.getQueryId().getId(), context.getClientInfo(), context.getSource(), Optional.empty());
+        Optional<Table> target = metadata.getMetastore().getTable(metastoreContext, tableName.getSchemaName(), tableName.getTableName());
 
         if (!target.isPresent()) {
             denyDropTable(tableName.toString(), "Table not found");

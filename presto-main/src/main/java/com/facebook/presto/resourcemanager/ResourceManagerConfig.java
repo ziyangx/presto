@@ -35,6 +35,11 @@ public class ResourceManagerConfig
     private int heartbeatThreads = 3;
     private int heartbeatConcurrency = 3;
     private int resourceManagerExecutorThreads = 1000;
+    private Duration proxyAsyncTimeout = new Duration(60, SECONDS);
+    private Duration memoryPoolFetchInterval = new Duration(1, SECONDS);
+    private boolean resourceGroupServiceCacheEnabled;
+    private Duration resourceGroupServiceCacheExpireInterval = new Duration(10, SECONDS);
+    private Duration resourceGroupServiceCacheRefreshInterval = new Duration(1, SECONDS);
 
     @MinDuration("1ms")
     public Duration getQueryExpirationTimeout()
@@ -165,6 +170,69 @@ public class ResourceManagerConfig
     public ResourceManagerConfig setResourceManagerExecutorThreads(int resourceManagerExecutorThreads)
     {
         this.resourceManagerExecutorThreads = resourceManagerExecutorThreads;
+        return this;
+    }
+
+    @MinDuration("1ms")
+    public Duration getProxyAsyncTimeout()
+    {
+        return proxyAsyncTimeout;
+    }
+
+    @Config("resource-manager.proxy-async-timeout")
+    public ResourceManagerConfig setProxyAsyncTimeout(Duration proxyAsyncTimeout)
+    {
+        this.proxyAsyncTimeout = proxyAsyncTimeout;
+        return this;
+    }
+
+    @MinDuration("1ms")
+    public Duration getMemoryPoolFetchInterval()
+    {
+        return memoryPoolFetchInterval;
+    }
+
+    @Config("resource-manager.memory-pool-fetch-interval")
+    public ResourceManagerConfig setMemoryPoolFetchInterval(Duration memoryPoolFetchInterval)
+    {
+        this.memoryPoolFetchInterval = memoryPoolFetchInterval;
+        return this;
+    }
+
+    public boolean getResourceGroupServiceCacheEnabled()
+    {
+        return resourceGroupServiceCacheEnabled;
+    }
+
+    @Config("resource-manager.resource-group-service-cache-enabled")
+    public ResourceManagerConfig setResourceGroupServiceCacheEnabled(Boolean resourceGroupServiceCacheEnabled)
+    {
+        this.resourceGroupServiceCacheEnabled = resourceGroupServiceCacheEnabled;
+        return this;
+    }
+
+    @MinDuration("1ms")
+    public Duration getResourceGroupServiceCacheExpireInterval()
+    {
+        return resourceGroupServiceCacheExpireInterval;
+    }
+
+    @Config("resource-manager.resource-group-service-cache-expire-interval")
+    public ResourceManagerConfig setResourceGroupServiceCacheExpireInterval(Duration resourceGroupServiceCacheExpireInterval)
+    {
+        this.resourceGroupServiceCacheExpireInterval = resourceGroupServiceCacheExpireInterval;
+        return this;
+    }
+
+    public Duration getResourceGroupServiceCacheRefreshInterval()
+    {
+        return resourceGroupServiceCacheRefreshInterval;
+    }
+
+    @Config("resource-manager.resource-group-service-cache-refresh-interval")
+    public ResourceManagerConfig setResourceGroupServiceCacheRefreshInterval(Duration resourceGroupServiceCacheRefreshInterval)
+    {
+        this.resourceGroupServiceCacheRefreshInterval = resourceGroupServiceCacheRefreshInterval;
         return this;
     }
 }

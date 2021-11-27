@@ -40,6 +40,7 @@ import com.facebook.presto.hive.HdfsEnvironment;
 import com.facebook.presto.hive.HiveBasicStatistics;
 import com.facebook.presto.hive.PartitionOfflineException;
 import com.facebook.presto.hive.TableOfflineException;
+import com.facebook.presto.spi.ConnectorSession;
 import com.facebook.presto.spi.ErrorCodeSupplier;
 import com.facebook.presto.spi.PrestoException;
 import com.facebook.presto.spi.SchemaTableName;
@@ -60,7 +61,6 @@ import org.apache.hadoop.fs.permission.FsPermission;
 import org.apache.hadoop.hive.common.FileUtils;
 import org.apache.hadoop.hive.common.type.HiveDecimal;
 import org.apache.hadoop.hive.metastore.ProtectMode;
-import org.apache.hadoop.hive.metastore.api.MetaException;
 import org.apache.hadoop.io.Text;
 import org.joda.time.DateTimeZone;
 import org.joda.time.format.DateTimeFormatter;
@@ -84,6 +84,7 @@ import java.util.OptionalLong;
 import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 import static com.facebook.presto.common.type.BooleanType.BOOLEAN;
 import static com.facebook.presto.common.type.Chars.isCharType;
@@ -115,7 +116,6 @@ import static java.util.stream.Collectors.toList;
 import static org.apache.hadoop.hive.common.FileUtils.unescapePathName;
 import static org.apache.hadoop.hive.metastore.ColumnType.typeToThriftType;
 import static org.apache.hadoop.hive.metastore.ProtectMode.getProtectModeFromString;
-import static org.apache.hadoop.hive.metastore.Warehouse.makeSpecFromName;
 import static org.apache.hadoop.hive.metastore.api.hive_metastoreConstants.BUCKET_COUNT;
 import static org.apache.hadoop.hive.metastore.api.hive_metastoreConstants.BUCKET_FIELD_NAME;
 import static org.apache.hadoop.hive.metastore.api.hive_metastoreConstants.FILE_INPUT_FORMAT;
@@ -132,6 +132,7 @@ import static org.joda.time.DateTimeZone.UTC;
 
 public class MetastoreUtil
 {
+    public static final String METASTORE_HEADERS = "metastore_headers";
     public static final String PRESTO_OFFLINE = "presto_offline";
     public static final String AVRO_SCHEMA_URL_KEY = "avro.schema.url";
     public static final String PRESTO_VIEW_FLAG = "presto_view";
@@ -146,7 +147,13 @@ public class MetastoreUtil
     private static final String NUM_ROWS = "numRows";
     private static final String RAW_DATA_SIZE = "rawDataSize";
     private static final String TOTAL_SIZE = "totalSize";
-    private static final Set<String> STATS_PROPERTIES = ImmutableSet.of(NUM_FILES, NUM_ROWS, RAW_DATA_SIZE, TOTAL_SIZE);
+    // transient_lastDdlTime is the parameter recording the latest ddl time.
+    // It should be added in STATS_PROPERTIES so that it can be skipped when
+    // updating StatisticsParameters, which allows hive find this dismiss
+    // parameter and create a new transient_lastDdlTime with present time
+    // rather than copying the old transient_lastDdlTime to hive partition.
+    private static final String TRANSIENT_LAST_DDL_TIME = "transient_lastDdlTime";
+    private static final Set<String> STATS_PROPERTIES = ImmutableSet.of(NUM_FILES, NUM_ROWS, RAW_DATA_SIZE, TOTAL_SIZE, TRANSIENT_LAST_DDL_TIME);
 
     private MetastoreUtil()
     {
@@ -315,21 +322,38 @@ public class MetastoreUtil
      * If the partition has more columns than the table does, the partitionSchemaDifference
      * map is expected to contain information for the missing columns.
      */
-    public static List<Column> reconstructPartitionSchema(List<Column> tableSchema, int partitionColumnCount, Map<Integer, Column> partitionSchemaDifference)
+    public static List<Column> reconstructPartitionSchema(List<Column> tableSchema, int partitionColumnCount, Map<Integer, Column> partitionSchemaDifference, Optional<Map<Integer, Integer>> tableToPartitionColumns)
     {
         ImmutableList.Builder<Column> columns = ImmutableList.builder();
-        for (int i = 0; i < partitionColumnCount; i++) {
-            Column column = partitionSchemaDifference.get(i);
-            if (column == null) {
-                checkArgument(
-                        i < tableSchema.size(),
-                        "column descriptor for column with hiveColumnIndex %s not found: tableSchema: %s, partitionSchemaDifference: %s",
-                        i,
-                        tableSchema,
-                        partitionSchemaDifference);
-                column = tableSchema.get(i);
+
+        if (tableToPartitionColumns.isPresent()) {
+            Map<Integer, Integer> partitionToTableColumns = tableToPartitionColumns.get()
+                    .entrySet()
+                    .stream()
+                    .collect(Collectors.toMap(Map.Entry::getValue, Map.Entry::getKey));
+
+            for (int i = 0; i < partitionColumnCount; i++) {
+                Column column = partitionSchemaDifference.get(i);
+                if (column == null) {
+                    column = tableSchema.get(partitionToTableColumns.get(i));
+                }
+                columns.add(column);
             }
-            columns.add(column);
+        }
+        else {
+            for (int i = 0; i < partitionColumnCount; i++) {
+                Column column = partitionSchemaDifference.get(i);
+                if (column == null) {
+                    checkArgument(
+                            i < tableSchema.size(),
+                            "column descriptor for column with hiveColumnIndex %s not found: tableSchema: %s, partitionSchemaDifference: %s",
+                            i,
+                            tableSchema,
+                            partitionSchemaDifference);
+                    column = tableSchema.get(i);
+                }
+                columns.add(column);
+            }
         }
         return columns.build();
     }
@@ -448,15 +472,32 @@ public class MetastoreUtil
         }
     }
 
-    // TODO: https://github.com/prestodb/presto/issues/15974
     public static Map<String, String> toPartitionNamesAndValues(String partitionName)
     {
-        try {
-            return ImmutableMap.copyOf(makeSpecFromName(partitionName));
+        ImmutableMap.Builder<String, String> resultBuilder = ImmutableMap.builder();
+        int index = 0;
+        int length = partitionName.length();
+
+        while (index < length) {
+            int keyStart = index;
+            while (index < length && partitionName.charAt(index) != '=') {
+                index++;
+            }
+            checkState(index < length, "Invalid partition spec: " + partitionName);
+
+            int keyEnd = index++;
+            int valueStart = index;
+            while (index < length && partitionName.charAt(index) != '/') {
+                index++;
+            }
+            int valueEnd = index++;
+
+            String key = unescapePathName(partitionName.substring(keyStart, keyEnd));
+            String value = unescapePathName(partitionName.substring(valueStart, valueEnd));
+            resultBuilder.put(key, value);
         }
-        catch (MetaException e) {
-            throw new PrestoException(HIVE_INVALID_PARTITION_VALUE, "Invalid partition name: " + partitionName);
-        }
+
+        return resultBuilder.build();
     }
 
     public static List<String> toPartitionValues(String partitionName)
@@ -862,5 +903,15 @@ public class MetastoreUtil
         statistics.getOnDiskDataSizeInBytes().ifPresent(size -> result.put(TOTAL_SIZE, Long.toString(size)));
 
         return result.build();
+    }
+
+    public static Optional<String> getMetastoreHeaders(ConnectorSession session)
+    {
+        try {
+            return Optional.ofNullable(session.getProperty(METASTORE_HEADERS, String.class));
+        }
+        catch (Exception e) {
+            return Optional.empty();
+        }
     }
 }

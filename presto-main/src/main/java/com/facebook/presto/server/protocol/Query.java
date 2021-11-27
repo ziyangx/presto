@@ -39,6 +39,7 @@ import com.facebook.presto.spi.function.SqlInvokedFunction;
 import com.facebook.presto.spi.page.PagesSerde;
 import com.facebook.presto.spi.page.SerializedPage;
 import com.facebook.presto.spi.security.SelectedRole;
+import com.facebook.presto.spi.tracing.Tracer;
 import com.facebook.presto.transaction.TransactionId;
 import com.facebook.presto.transaction.TransactionInfo;
 import com.facebook.presto.transaction.TransactionManager;
@@ -77,7 +78,7 @@ import static com.facebook.presto.SystemSessionProperties.getTargetResultSize;
 import static com.facebook.presto.SystemSessionProperties.isExchangeChecksumEnabled;
 import static com.facebook.presto.SystemSessionProperties.isExchangeCompressionEnabled;
 import static com.facebook.presto.execution.QueryState.FAILED;
-import static com.facebook.presto.execution.QueryState.QUEUED;
+import static com.facebook.presto.execution.QueryState.WAITING_FOR_PREREQUISITES;
 import static com.facebook.presto.server.protocol.QueryResourceUtil.toStatementStats;
 import static com.facebook.presto.spi.StandardErrorCode.GENERIC_INTERNAL_ERROR;
 import static com.facebook.presto.util.Failures.toFailure;
@@ -178,7 +179,7 @@ class Query
 
         result.queryManager.addOutputInfoListener(result.getQueryId(), result::setQueryOutputInfo);
 
-        result.queryManager.addStateChangeListener(result.getQueryId(), state -> {
+        result.queryManager.addStateChangeListener(result.getQueryId(), (state) -> {
             if (state.isDone()) {
                 QueryInfo queryInfo = queryManager.getFullQueryInfo(result.getQueryId());
                 result.closeExchangeClientIfNecessary(queryInfo);
@@ -242,6 +243,13 @@ class Query
     public boolean isSlugValid(String slug)
     {
         return this.slug.equals(slug);
+    }
+
+    public Tracer getTracer()
+    {
+        Optional<Tracer> tracer = session.getTracer();
+        checkArgument(tracer.isPresent(), "tracer is not present");
+        return tracer.get();
     }
 
     public synchronized Optional<String> getSetCatalog()
@@ -403,8 +411,8 @@ class Query
                 queryResults.getColumns(),
                 null,
                 StatementStats.builder()
-                        .setState(QUEUED.toString())
-                        .setQueued(true)
+                        .setState(WAITING_FOR_PREREQUISITES.toString())
+                        .setWaitingForPrerequisites(true)
                         .build(),
                 null,
                 ImmutableList.of(),

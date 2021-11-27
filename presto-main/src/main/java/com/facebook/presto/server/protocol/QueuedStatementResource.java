@@ -22,12 +22,14 @@ import com.facebook.presto.dispatcher.DispatchInfo;
 import com.facebook.presto.dispatcher.DispatchManager;
 import com.facebook.presto.execution.ExecutionFailureInfo;
 import com.facebook.presto.execution.QueryState;
+import com.facebook.presto.metadata.SessionPropertyManager;
 import com.facebook.presto.server.HttpRequestSessionContext;
 import com.facebook.presto.server.ServerConfig;
 import com.facebook.presto.server.SessionContext;
 import com.facebook.presto.spi.ErrorCode;
 import com.facebook.presto.spi.PrestoException;
 import com.facebook.presto.spi.QueryId;
+import com.facebook.presto.spi.tracing.TracerProvider;
 import com.facebook.presto.sql.parser.SqlParserOptions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
@@ -71,6 +73,7 @@ import static com.facebook.airlift.concurrent.Threads.threadsNamed;
 import static com.facebook.airlift.http.server.AsyncResponseHandler.bindAsyncResponse;
 import static com.facebook.presto.execution.QueryState.FAILED;
 import static com.facebook.presto.execution.QueryState.QUEUED;
+import static com.facebook.presto.execution.QueryState.WAITING_FOR_PREREQUISITES;
 import static com.facebook.presto.server.security.RoleType.USER;
 import static com.facebook.presto.spi.StandardErrorCode.GENERIC_INTERNAL_ERROR;
 import static com.facebook.presto.spi.StandardErrorCode.RETRY_QUERY_NOT_FOUND;
@@ -117,6 +120,8 @@ public class QueuedStatementResource
     private final boolean compressionEnabled;
 
     private final SqlParserOptions sqlParserOptions;
+    private final TracerProvider tracerProvider;
+    private final SessionPropertyManager sessionPropertyManager;     // We may need some system default session property values at early query stage even before session is created.
 
     @Inject
     public QueuedStatementResource(
@@ -124,7 +129,9 @@ public class QueuedStatementResource
             DispatchExecutor executor,
             LocalQueryProvider queryResultsProvider,
             SqlParserOptions sqlParserOptions,
-            ServerConfig serverConfig)
+            ServerConfig serverConfig,
+            TracerProvider tracerProvider,
+            SessionPropertyManager sessionPropertyManager)
     {
         this.dispatchManager = requireNonNull(dispatchManager, "dispatchManager is null");
         this.queryResultsProvider = queryResultsProvider;
@@ -133,6 +140,8 @@ public class QueuedStatementResource
 
         this.responseExecutor = requireNonNull(executor, "responseExecutor is null").getExecutor();
         this.timeoutExecutor = requireNonNull(executor, "timeoutExecutor is null").getScheduledExecutor();
+        this.tracerProvider = requireNonNull(tracerProvider, "tracerProvider is null");
+        this.sessionPropertyManager = sessionPropertyManager;
 
         queryPurger.scheduleWithFixedDelay(
                 () -> {
@@ -169,7 +178,13 @@ public class QueuedStatementResource
             throw badRequest(BAD_REQUEST, "SQL statement is empty");
         }
 
-        SessionContext sessionContext = new HttpRequestSessionContext(servletRequest, sqlParserOptions);
+        // TODO: For future cases we may want to start tracing from client. Then continuation of tracing
+        //       will be needed instead of creating a new trace here.
+        SessionContext sessionContext = new HttpRequestSessionContext(
+                servletRequest,
+                sqlParserOptions,
+                tracerProvider.getNewTracer(),
+                Optional.of(sessionPropertyManager));
         Query query = new Query(statement, sessionContext, dispatchManager, queryResultsProvider, 0);
         queries.put(query.getQueryId(), query);
 
@@ -311,9 +326,10 @@ public class QueuedStatementResource
             UriInfo uriInfo,
             String xForwardedProto,
             Duration elapsedTime,
-            Duration queuedTime)
+            Optional<Duration> queuedTime,
+            Duration waitingForPrerequisitesTime)
     {
-        QueryState state = queryError.map(error -> FAILED).orElse(QUEUED);
+        QueryState state = queryError.map(error -> FAILED).orElse(queuedTime.isPresent() ? QUEUED : WAITING_FOR_PREREQUISITES);
         return new QueryResults(
                 queryId.toString(),
                 getQueryHtmlUri(queryId, uriInfo, xForwardedProto),
@@ -323,9 +339,10 @@ public class QueuedStatementResource
                 null,
                 StatementStats.builder()
                         .setState(state.toString())
-                        .setQueued(state == QUEUED)
+                        .setWaitingForPrerequisites(state == WAITING_FOR_PREREQUISITES)
                         .setElapsedTimeMillis(elapsedTime.toMillis())
-                        .setQueuedTimeMillis(queuedTime.toMillis())
+                        .setQueuedTimeMillis(queuedTime.orElse(NO_DURATION).toMillis())
+                        .setWaitingForPrerequisitesTimeMillis(waitingForPrerequisitesTime.toMillis())
                         .build(),
                 queryError.orElse(null),
                 ImmutableList.of(),
@@ -433,7 +450,7 @@ public class QueuedStatementResource
                     1,
                     uriInfo,
                     xForwardedProto,
-                    DispatchInfo.queued(NO_DURATION, NO_DURATION));
+                    DispatchInfo.waitingForPrerequisites(NO_DURATION, NO_DURATION));
         }
 
         public ListenableFuture<Response> toResponse(long token, UriInfo uriInfo, String xForwardedProto, Duration maxWait, boolean compressionEnabled)
@@ -453,7 +470,7 @@ public class QueuedStatementResource
                             token + 1,
                             uriInfo,
                             xForwardedProto,
-                            DispatchInfo.queued(NO_DURATION, NO_DURATION));
+                            DispatchInfo.waitingForPrerequisites(NO_DURATION, NO_DURATION));
                     return immediateFuture(withCompressionConfiguration(Response.ok(queryResults), compressionEnabled).build());
                 }
             }
@@ -504,7 +521,8 @@ public class QueuedStatementResource
                     uriInfo,
                     xForwardedProto,
                     dispatchInfo.getElapsedTime(),
-                    dispatchInfo.getQueuedTime());
+                    dispatchInfo.getQueuedTime(),
+                    dispatchInfo.getWaitingForPrerequisitesTime());
         }
 
         private URI getNextUri(long token, UriInfo uriInfo, String xForwardedProto, DispatchInfo dispatchInfo)

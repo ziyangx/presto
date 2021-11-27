@@ -41,7 +41,12 @@ public class TestResourceManagerConfig
                 .setMemoryPoolInfoRefreshDuration(new Duration(1, SECONDS))
                 .setResourceManagerExecutorThreads(1000)
                 .setNodeHeartbeatInterval(new Duration(1, SECONDS))
-                .setQueryHeartbeatInterval(new Duration(1, SECONDS)));
+                .setQueryHeartbeatInterval(new Duration(1, SECONDS))
+                .setProxyAsyncTimeout(new Duration(60, SECONDS))
+                .setMemoryPoolFetchInterval(new Duration(1, SECONDS))
+                .setResourceGroupServiceCacheEnabled(false)
+                .setResourceGroupServiceCacheExpireInterval(new Duration(10, SECONDS))
+                .setResourceGroupServiceCacheRefreshInterval(new Duration(1, SECONDS)));
     }
 
     @Test
@@ -58,6 +63,11 @@ public class TestResourceManagerConfig
                 .put("resource-manager.executor-threads", "1234")
                 .put("resource-manager.node-heartbeat-interval", "25m")
                 .put("resource-manager.query-heartbeat-interval", "75m")
+                .put("resource-manager.proxy-async-timeout", "345m")
+                .put("resource-manager.memory-pool-fetch-interval", "6m")
+                .put("resource-manager.resource-group-service-cache-enabled", "true")
+                .put("resource-manager.resource-group-service-cache-expire-interval", "1m")
+                .put("resource-manager.resource-group-service-cache-refresh-interval", "10m")
                 .build();
 
         ResourceManagerConfig expected = new ResourceManagerConfig()
@@ -70,7 +80,12 @@ public class TestResourceManagerConfig
                 .setMemoryPoolInfoRefreshDuration(new Duration(2, HOURS))
                 .setResourceManagerExecutorThreads(1234)
                 .setNodeHeartbeatInterval(new Duration(25, MINUTES))
-                .setQueryHeartbeatInterval(new Duration(75, MINUTES));
+                .setQueryHeartbeatInterval(new Duration(75, MINUTES))
+                .setProxyAsyncTimeout(new Duration(345, MINUTES))
+                .setMemoryPoolFetchInterval(new Duration(6, MINUTES))
+                .setResourceGroupServiceCacheEnabled(true)
+                .setResourceGroupServiceCacheExpireInterval(new Duration(1, MINUTES))
+                .setResourceGroupServiceCacheRefreshInterval(new Duration(10, MINUTES));
 
         assertFullMapping(properties, expected);
     }

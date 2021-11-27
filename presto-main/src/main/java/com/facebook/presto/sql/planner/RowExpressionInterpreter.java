@@ -76,7 +76,7 @@ import static com.facebook.presto.metadata.CastType.CAST;
 import static com.facebook.presto.metadata.CastType.JSON_TO_ARRAY_CAST;
 import static com.facebook.presto.metadata.CastType.JSON_TO_MAP_CAST;
 import static com.facebook.presto.metadata.CastType.JSON_TO_ROW_CAST;
-import static com.facebook.presto.spi.function.FunctionImplementationType.BUILTIN;
+import static com.facebook.presto.spi.function.FunctionImplementationType.JAVA;
 import static com.facebook.presto.spi.function.FunctionImplementationType.SQL;
 import static com.facebook.presto.spi.function.FunctionKind.SCALAR;
 import static com.facebook.presto.spi.relation.ExpressionOptimizer.Level;
@@ -274,7 +274,7 @@ public class RowExpressionInterpreter
                 // do not interpret remote functions on coordinator
                 return call(node.getDisplayName(), functionHandle, node.getType(), toRowExpressions(argumentValues, node.getArguments()));
             }
-            else if (implementationType.equals(BUILTIN)) {
+            else if (implementationType.equals(JAVA)) {
                 value = functionInvoker.invoke(functionHandle, session.getSqlFunctionProperties(), argumentValues);
             }
             else {
@@ -293,6 +293,9 @@ public class RowExpressionInterpreter
                 }
                 else {
                     value = rowExpressionInterpreter.optimize();
+                }
+                if (value instanceof CallExpression) {
+                    return call(node.getDisplayName(), functionHandle, node.getType(), toRowExpressions(argumentValues, node.getArguments()));
                 }
             }
             if (optimizationLevel.ordinal() <= SERIALIZABLE.ordinal() && !isSerializable(value, node.getType())) {
@@ -606,7 +609,7 @@ public class RowExpressionInterpreter
                     List<Object> values = node.getArguments()
                             .stream()
                             .map(value -> value.accept(this, context))
-                            .collect(toImmutableList());
+                            .collect(toList());
                     if (hasUnresolvedValue(values)) {
                         return new SpecialFormExpression(
                                 BIND,

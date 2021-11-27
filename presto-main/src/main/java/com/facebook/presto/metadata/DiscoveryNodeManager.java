@@ -253,7 +253,7 @@ public final class DiscoveryNodeManager
         Set<ServiceDescriptor> services = serviceSelector.selectAllServices().stream()
                 .filter(service -> !failureDetector.getFailed().contains(service))
                 // Allowing coordinator node in the list of services, even if it's not allowed by nodeStatusService with currentNode check
-                .filter(service -> !nodeStatusService.isPresent() || nodeStatusService.get().isAllowed(service.getLocation()) || isCoordinator(service))
+                .filter(service -> !nodeStatusService.isPresent() || nodeStatusService.get().isAllowed(service.getLocation()) || isCoordinator(service) || isResourceManager(service))
                 .collect(toImmutableSet());
 
         ImmutableSet.Builder<InternalNode> activeNodesBuilder = ImmutableSortedSet.orderedBy(comparing(InternalNode::getNodeIdentifier));
@@ -453,6 +453,12 @@ public final class DiscoveryNodeManager
     public synchronized Set<InternalNode> getCoordinators()
     {
         return coordinators;
+    }
+
+    @Override
+    public Set<InternalNode> getShuttingDownCoordinator()
+    {
+        return getNodes(SHUTTING_DOWN).stream().filter(InternalNode::isCoordinator).collect(toImmutableSet());
     }
 
     @Override
